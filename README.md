@@ -1,66 +1,31 @@
-## Foundry
+# DeFi Stablecoin Project
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+This is a decentralized, algorithmic stablecoin designed to maintain a relative peg to USD. The protocol is built with exogenous collateralization using assets like wETH and wBTC, and it leverages Foundry for development, testing, and deployment.
 
-Foundry consists of:
+## Key Features
 
--   **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
--   **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
--   **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
--   **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+- **Relative Stability**: Maintains a peg to USD.
+- **Algorithmic Stability Mechanism**: Decentralized algorithms ensure the stability of the stablecoin.
+- **Exogenous Collateralization**: Backed by external assets such as:
+  - wETH (Wrapped Ether)
+  - wBTC (Wrapped Bitcoin)
 
-## Documentation
+---
 
-https://book.getfoundry.sh/
+## Getting Started
 
-## Usage
+### Prerequisites
 
-### Build
+Before you begin, ensure you have the following tools installed:
 
-```shell
-$ forge build
-```
+- **Foundry**: A fast, portable, and modular toolkit for Ethereum development.
+  - [Install Foundry](https://book.getfoundry.sh/getting-started/installation.html)
+- **Node.js & npm**: Used for package management and scripts.
+- **Git**: For version control.
 
-### Test
+### Installation
 
-```shell
-$ forge test
-```
-
-### Format
-
-```shell
-$ forge fmt
-```
-
-### Gas Snapshots
-
-```shell
-$ forge snapshot
-```
-
-### Anvil
-
-```shell
-$ anvil
-```
-
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/your-repo-name/defi-stablecoin.git
+   cd defi-stablecoin
