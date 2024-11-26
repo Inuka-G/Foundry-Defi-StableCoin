@@ -5,6 +5,7 @@ import {DecentralizedStableCoin} from "./DecentralizedStableCoin.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+import {OracleLib} from "./lib/OracleLib.sol";
 
 ///////////////////////////////////////////////////
 // Developed by Axion chain labs  //////////////////
@@ -59,6 +60,7 @@ contract DSCEngine is ReentrancyGuard {
     ///////////////
     // Events    //
     ///////////////
+    uisng OracleLib for AggregatorV3Interface;
 
     event CollateralDeposited(address indexed user, address indexed tokenCollateralAddress, uint256 amountColletaral);
     event CollateralRedeemed(
@@ -200,7 +202,7 @@ contract DSCEngine is ReentrancyGuard {
         returns (uint256)
     {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(s_priceFeeds[tokenCollateralAddress]);
-        (, int256 price,,,) = priceFeed.latestRoundData();
+        (, int256 price,,,) = priceFeed.staleCheckLatestRoundData();
         return (usdAmountInWei * PRECISION) / (uint256(price) * ADDITIONAL_PRECISION);
     }
 
@@ -277,7 +279,7 @@ contract DSCEngine is ReentrancyGuard {
 
     function getUsdValue(address token, uint256 amount) public view returns (uint256) {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(s_priceFeeds[token]);
-        (, int256 price,,,) = priceFeed.latestRoundData();
+        (, int256 price,,,) = priceFeed.staleCheckLatestRoundData();
         // 1 ETH =3000 USD
         // return value from chainlink is 3000 * 10^8
         return ((uint256(price) * ADDITIONAL_PRECISION) * amount) / PRECISION;
@@ -289,5 +291,13 @@ contract DSCEngine is ReentrancyGuard {
         returns (uint256 totalCollateralValue, uint256 totalAXUSDMinted)
     {
         (totalCollateralValue, totalAXUSDMinted) = _getUserAccountDetails(user);
+    }
+
+    function getCollateralAddresses() public view returns (address[] memory) {
+        return s_collateralTokens;
+    }
+
+    function getColleralBalanceofUser(address user, address tokenCollateralAddress) public view returns (uint256) {
+        return s_collateralDeposited[user][tokenCollateralAddress];
     }
 }
