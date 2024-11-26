@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: SEE LICENSE IN LICENSE
-pragma solidity ^0.8.18;
+pragma solidity ^0.8.19;
 
 import {DecentralizedStableCoin} from "./DecentralizedStableCoin.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -34,6 +34,8 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__NotAllowedToken();
     error DSCEngine__BelowTheHealthFactor(uint256 healthFactor);
     error DSCEngine__NotMinted();
+    error DSCEngine__TransferFailed();
+    error DSCEngine__HealthFactorIsFine();
 
     ///////////////////////
     // State variables   //
@@ -43,7 +45,8 @@ contract DSCEngine is ReentrancyGuard {
     uint256 public constant PRECISION = 1e18;
     uint256 public constant LIQUIDATE_THRESHOLD = 50;
     uint256 public constant LIQUIDATE_PRECISON = 100;
-    uint256 public constant MIN_HEALTH_FACTOR = 1;
+    uint256 public constant MIN_HEALTH_FACTOR = 1e18;
+    uint256 public constant LIQUIDATE_BONUS = 10;
 
     mapping(address token => address priceFeed) public s_priceFeeds;
     mapping(address user => mapping(address tokenCollateralAddress => uint256 amount)) public s_collateralDeposited;
@@ -58,6 +61,9 @@ contract DSCEngine is ReentrancyGuard {
     ///////////////
 
     event CollateralDeposited(address indexed user, address indexed tokenCollateralAddress, uint256 amountColletaral);
+    event CollateralRedeemed(
+        address indexed from, address indexed to, address indexed tokenCollateralAddress, uint256 amount
+    );
 
     ///////////////
     // Modifiers //
@@ -91,14 +97,21 @@ contract DSCEngine is ReentrancyGuard {
         i_stableCoinContractAddress = DecentralizedStableCoin(axionStableCoinAddress);
     }
 
-    function depositCollateralAndMintAXUSD() external {}
+    function depositCollateralAndMintAXUSD(
+        address tokenCollateralAddress,
+        uint256 amountColletaral,
+        uint256 amountToBeMinted
+    ) external {
+        depositCollateral(tokenCollateralAddress, amountColletaral);
+        mintAXUSD(amountToBeMinted);
+    }
 
     /**
      * @param tokenCollateralAddress address of the token to be deposited as collateral (weth or wbtc contract address)
      * @param amountColletaral amount of token to be deposited as collateral
      */
     function depositCollateral(address tokenCollateralAddress, uint256 amountColletaral)
-        external
+        public
         notZeroAmount(amountColletaral)
         isAllowedToken(tokenCollateralAddress)
         nonReentrant
@@ -109,9 +122,23 @@ contract DSCEngine is ReentrancyGuard {
         IERC20(tokenCollateralAddress).transferFrom(msg.sender, address(this), amountColletaral);
     }
 
-    function redeemCollateralForAXUSD() public {}
+    function redeemCollateralForAXUSD(address tokenCollateralAddress, uint256 amountCollateral, uint256 amountToBurn)
+        public
+    {
+        burnAXUSD(amountToBurn);
+        redeemCollateral(tokenCollateralAddress, amountCollateral);
+        // redeem collateral already check revertIfHealthFactorIsBroken
+    }
 
-    function redeemCollateral() public {}
+    function redeemCollateral(address tokenCollateralAddress, uint256 amount)
+        public
+        notZeroAmount(amount)
+        nonReentrant
+    {
+        _redeemCollateral(msg.sender, msg.sender, tokenCollateralAddress, amount);
+
+        _revertIfHealthFactorIsBroken(msg.sender);
+    }
     /**
      * @param amountToBeMinted amount of AXUSD to be minted
      * should only be minted if collateral> amountToBeMinted
@@ -126,11 +153,81 @@ contract DSCEngine is ReentrancyGuard {
         }
     }
 
-    function burnAXUSD() public {}
+    function burnAXUSD(uint256 amountTobeBurn) public notZeroAmount(amountTobeBurn) nonReentrant {
+        _burnAXUSD(msg.sender, msg.sender, amountTobeBurn);
+        _revertIfHealthFactorIsBroken(msg.sender);
+    }
+    /*
+     * @param collateral: The ERC20 token address of the collateral you're using to make the protocol solvent again.
+     * This is collateral that you're going to take from the user who is insolvent.
+     * In return, you have to burn your DSC to pay off their debt, but you don't pay off your own.
+     * @param user: The user who is insolvent. They have to have a _healthFactor below MIN_HEALTH_FACTOR
+     * @param debtToCover: The amount of DSC you want to burn to cover the user's debt.
+     *
+     * @notice: You can partially liquidate a user.
+     * @notice: You will get a 10% LIQUIDATION_BONUS for taking the users funds.
+     * @notice: This function working assumes that the protocol will be roughly 150% overcollateralized in order for this to work.
+     * @notice: A known bug would be if the protocol was only 100% collateralized, we wouldn't be able to liquidate anyone.
+     * For example, if the price of the collateral plummeted before anyone could be liquidated.
+     */
 
-    function liquidate() public {}
+    function liquidate(address tokenCollateralAddress, address user, uint256 debtToCover)
+        public
+        notZeroAmount(debtToCover)
+        nonReentrant
+    {
+        uint256 startingHealthFactor = _healthFactor(user);
+        if (startingHealthFactor >= MIN_HEALTH_FACTOR) {
+            revert DSCEngine__HealthFactorIsFine();
+        }
+        // amount of eth to cover the debt
+        uint256 tokenColleralAmountFromUSD = getColleralAmountFromUSD(tokenCollateralAddress, debtToCover);
+        // giving a 10% bonus
+        uint256 bonusColleteralAmount = tokenColleralAmountFromUSD * LIQUIDATE_BONUS / LIQUIDATE_PRECISON;
+        uint256 totalCollateralAmount = tokenColleralAmountFromUSD + bonusColleteralAmount;
+        _redeemCollateral(user, msg.sender, tokenCollateralAddress, totalCollateralAmount);
+        _burnAXUSD(user, msg.sender, debtToCover);
+        uint256 endingHealthFactor = _healthFactor(user);
+        if (endingHealthFactor <= MIN_HEALTH_FACTOR) {
+            revert DSCEngine__BelowTheHealthFactor(endingHealthFactor);
+        }
+        _revertIfHealthFactorIsBroken(msg.sender);
+    }
+
+    function getColleralAmountFromUSD(address tokenCollateralAddress, uint256 usdAmountInWei)
+        public
+        view
+        returns (uint256)
+    {
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(s_priceFeeds[tokenCollateralAddress]);
+        (, int256 price,,,) = priceFeed.latestRoundData();
+        return (usdAmountInWei * PRECISION) / (uint256(price) * ADDITIONAL_PRECISION);
+    }
 
     function getHealthFactor() public {}
+    ////////////////////////////
+    // Internal functions    //
+    ////////////////////////////
+
+    function _burnAXUSD(address onBehalf, address from, uint256 amountTobeBurn) internal {
+        s_axusdMinted[onBehalf] -= amountTobeBurn;
+        bool success = i_stableCoinContractAddress.transferFrom(from, address(this), amountTobeBurn);
+        if (!success) {
+            revert DSCEngine__TransferFailed();
+        }
+        i_stableCoinContractAddress.burn(amountTobeBurn);
+    }
+
+    function _redeemCollateral(address from, address to, address tokenCollateralAddress, uint256 collateralAmount)
+        internal
+    {
+        s_collateralDeposited[from][tokenCollateralAddress] -= collateralAmount;
+        emit CollateralRedeemed(from, to, tokenCollateralAddress, collateralAmount);
+        bool success = IERC20(tokenCollateralAddress).transfer(to, collateralAmount);
+        if (!success) {
+            revert DSCEngine__TransferFailed();
+        }
+    }
 
     /**
      * @param user address of the user
@@ -149,6 +246,7 @@ contract DSCEngine is ReentrancyGuard {
      */
     function _healthFactor(address user) private view returns (uint256) {
         (uint256 totalCollateralValue, uint256 totalAXUSDMinted) = _getUserAccountDetails(user);
+        if (totalAXUSDMinted == 0) return type(uint256).max;
         uint256 collateralAdjustedForTheshold = totalCollateralValue * LIQUIDATE_THRESHOLD / LIQUIDATE_PRECISON;
 
         return collateralAdjustedForTheshold * PRECISION / totalAXUSDMinted;
@@ -183,5 +281,13 @@ contract DSCEngine is ReentrancyGuard {
         // 1 ETH =3000 USD
         // return value from chainlink is 3000 * 10^8
         return ((uint256(price) * ADDITIONAL_PRECISION) * amount) / PRECISION;
+    }
+
+    function getUserAccountDetails(address user)
+        public
+        view
+        returns (uint256 totalCollateralValue, uint256 totalAXUSDMinted)
+    {
+        (totalCollateralValue, totalAXUSDMinted) = _getUserAccountDetails(user);
     }
 }
