@@ -23,7 +23,7 @@ contract Handler is Test {
         address[] memory collateralAddresses = _engine.getCollateralAddresses();
         weth = ERC20Mock(collateralAddresses[0]);
         wbtc = ERC20Mock(collateralAddresses[1]);
-        ethPriceFeed = engine.s_priceFeeds(address(weth));
+        ethPriceFeed = MockV3Aggregator(engine.getCollateralTokenPriceFeed(address(weth)));
     }
 
     function depositCollateral(uint256 collateralSeeds, uint256 amount) public {

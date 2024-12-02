@@ -60,7 +60,7 @@ contract DSCEngine is ReentrancyGuard {
     ///////////////
     // Events    //
     ///////////////
-    uisng OracleLib for AggregatorV3Interface;
+    using OracleLib for AggregatorV3Interface;
 
     event CollateralDeposited(address indexed user, address indexed tokenCollateralAddress, uint256 amountColletaral);
     event CollateralRedeemed(
@@ -299,5 +299,8 @@ contract DSCEngine is ReentrancyGuard {
 
     function getColleralBalanceofUser(address user, address tokenCollateralAddress) public view returns (uint256) {
         return s_collateralDeposited[user][tokenCollateralAddress];
+    }
+    function getCollateralTokenPriceFeed(address tokenCollateralAddress) public view returns (address) {
+        return s_priceFeeds[tokenCollateralAddress];
     }
 }
